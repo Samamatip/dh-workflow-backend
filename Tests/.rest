@@ -1,0 +1,90 @@
+### login user
+POST http://localhost:8000/api/auth/login
+Content-Type: application/json
+
+{
+    "email":"exampleuser@gmail.com",
+    "password":"AdminPassword123",
+    "rememberMe":false
+}
+
+
+### login user
+POST http://localhost:8000/api/auth/login
+Content-Type: application/json
+
+{
+    "email":"examplestaff@gmail.com",
+    "password":"StaffPassword123",
+    "rememberMe":false
+}
+
+### get user profile
+GET http://localhost:8000/api/auth/user
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4NWQ5ZWYxMzYzZjNlZGQxMzcwYTk4MSIsImlzc3VlZEF0IjoxNzUxMTE3ODc4LCJpYXQiOjE3NTExMTc4NzgsImV4cCI6MTc1MTEyMTQ3OH0.6rreJykSn9AmIF0Rzh5dLzhNuY_JDPcC_xK-WbrqCS4
+
+
+### get all departments
+GET http://localhost:8000/api/departments
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4NWQ5ZWYxMzYzZjNlZGQxMzcwYTk4MSIsImlzc3VlZEF0IjoxNzUxMTMwOTczLCJpYXQiOjE3NTExMzA5NzMsImV4cCI6MTc1MTEzNDU3M30.N2_exyQ6KCG-KDiTUXIliR6wf0efNd4Nguj4jjsKgE0
+
+###get published shift by department and date
+GET http://localhost:8000/api/shifts/685fee0161037c3e7a485df3?date=2025-08
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4NWQ5ZWYxMzYzZjNlZGQxMzcwYTk4MSIsImlzc3VlZEF0IjoxNzUxMTE3ODc4LCJpYXQiOjE3NTExMTc4NzgsImV4cCI6MTc1MTEyMTQ3OH0.6rreJykSn9AmIF0Rzh5dLzhNuY_JDPcC_xK-WbrqCS4
+
+
+###get unpublished shift by department and date
+GET http://localhost:8000/api/shifts/unpublished/685fee0161037c3e7a485df9?date=2025-08
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4NWQ5ZWYxMzYzZjNlZGQxMzcwYTk4MSIsImlzc3VlZEF0IjoxNzUxMTE3ODc4LCJpYXQiOjE3NTExMTc4NzgsImV4cCI6MTc1MTEyMTQ3OH0.6rreJykSn9AmIF0Rzh5dLzhNuY_JDPcC_xK-WbrqCS4
+
+
+### get all groups
+GET http://localhost:8000/api/groups
+Content-Type: application/json
+Authorization:Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4NWQ5ZWYxMzYzZjNlZGQxMzcwYTk4MSIsImlzc3VlZEF0IjoxNzUxMTQyOTAyLCJpYXQiOjE3NTExNDI5MDIsImV4cCI6MTc1MTE0NjUwMn0.7QJVgGOh4pLtxRpKhfZ_KNRokEQDmh6-N816EQQrUUs
+
+### create new shifts
+POST http://localhost:8000/api/shifts/upload
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4NWQ5ZWYxMzYzZjNlZGQxMzcwYTk4MSIsImlzc3VlZEF0IjoxNzUxMTQyOTAyLCJpYXQiOjE3NTExNDI5MDIsImV4cCI6MTc1MTE0NjUwMn0.7QJVgGOh4pLtxRpKhfZ_KNRokEQDmh6-N816EQQrUUs
+
+{
+  "department": "685fee0161037c3e7a485df9",
+  "published": false,
+  "shift": [
+    {
+      "date": "2025-07-10",
+      "startTime": "09:00 AM",
+      "endTime": "05:00 PM",
+      "quantity": 2
+    },
+    {
+      "date": "2025-07-11",
+      "startTime": "10:00 AM",
+      "endTime": "06:00 PM",
+      "quantity": 3
+    }
+  ]
+}
+
+###  Get approved shift by userID
+GET http://localhost:8000/api/shifts/approved/6866d8788d38b630a4c93f1b?date=2025-06
+Content-Type: application/json
+Authorization:Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4NjZiMmQ3OGE2MjQ5MjkzOGUzZjliMSIsImlzc3VlZEF0IjoxNzUxOTI0NDYzLCJpYXQiOjE3NTE5MjQ0NjMsImV4cCI6MTc1MTkyODA2M30.WrR3xHq0WoeicgliuYybomo3RlU2AFDYuHqJFoB6ckY
+
+
+
+### fetch user available shift in their department
+GET http://localhost:8000/api/shifts/available-my-department/6866d8788d38b630a4c93f1b/?date=2025-06
+Content-Type: application/json
+Authorization:Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4NjZkODc4OGQzOGI2MzBhNGM5M2YxYiIsImlzc3VlZEF0IjoxNzUxOTMyOTA1LCJpYXQiOjE3NTE5MzI5MDUsImV4cCI6MTc1MTkzNjUwNX0.1fUyPBdjgIhFKzz2DU-ws3V2EFxrrin6lJTMIW4pjws
+
+
+### fetch user available shift in other department
+GET http://localhost:8000/api/shifts/available/other-department/6866d8788d38b630a4c93f1b/?date=2025-06
+Content-Type: application/json
+Authorization:Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4NjZiMmQ3OGE2MjQ5MjkzOGUzZjliMSIsImlzc3VlZEF0IjoxNzUxOTI0NDYzLCJpYXQiOjE3NTE5MjQ0NjMsImV4cCI6MTc1MTkyODA2M30.WrR3xHq0WoeicgliuYybomo3RlU2AFDYuHqJFoB6ckY
