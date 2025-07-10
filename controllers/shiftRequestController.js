@@ -169,13 +169,15 @@ exports.reviewShiftRequest = async (req, res) => {
         endTime: shiftRequest.endTime,
         quantity: 1, // Backdoor requests are typically for 1 person
         published: true, // Mark as published so it appears in approved shifts
-        status: {
+        status: [{
           status: 'approved',
-          by: shiftRequest.requestedBy
-        },
-        slotsTaken: 1,
-        takenBy: [shiftRequest.requestedBy], // Add the requesting user to takenBy array
-        isBackdoorRequest: true // Flag to identify it came from a backdoor request
+          by: shiftRequest.requestedBy,
+          isBackdoorRequest: true,
+          bookedAt: new Date(),
+          reviewedAt: new Date(),
+          reviewedBy: req.user?._id || null
+        }],
+        rejectionHistory: []
       };
 
       // Add the shift to the document
