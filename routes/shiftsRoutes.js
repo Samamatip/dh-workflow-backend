@@ -11,6 +11,7 @@ const {
     bookShift,
     approveShift,
     rejectShift,
+    cancelUserBooking,
     publishShift,
     getPendingShifts,
     getPendingShiftsByUser,
@@ -19,6 +20,9 @@ const {
 } = require('../controllers/shiftsController');
 // POST /api/shifts/book/:shiftId - staff books a shift
 router.post('/book/:shiftId', isStaff, bookShift);
+
+// POST /api/shifts/cancel/:shiftId - staff cancels their own booking
+router.post('/cancel/:shiftId', isStaff, cancelUserBooking);
 
 // POST /api/shifts/approve/:shiftId - admin approves a booked shift
 router.post('/approve/:shiftId', isStaff, isAdmin, approveShift);

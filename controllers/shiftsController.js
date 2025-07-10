@@ -2,11 +2,12 @@ const Shifts = require('../models/shiftsSchema');
 const mongoose = require('mongoose');
 const User = require('../models/userSchema');
 
-// Staff books a shift (set status to 'pending' and add user to takenBy)
+// Staff books a shift (add new status entry with 'pending' status)
 exports.bookShift = async (req, res) => {
   try {
     const { shiftId } = req.params;
-    const { userId } = req.body;
+    const { userId, isBackdoorRequest = false } = req.body;
+    
     if (!shiftId || !userId) {
       return res.status(400).json({ message: 'shiftId and userId are required.' });
     }
@@ -23,29 +24,58 @@ exports.bookShift = async (req, res) => {
       return res.status(404).json({ message: 'Shift not found in document.' });
     }
 
-    // Only allow booking if available
-    if (shift.status.status !== 'available') {
-      return res.status(400).json({ message: 'Shift is not available for booking.' });
+    // Check if user has already booked this shift
+    const existingBooking = shift.status.find(statusEntry => 
+      statusEntry.by && statusEntry.by.toString() === userId && 
+      ['pending', 'approved'].includes(statusEntry.status)
+    );
+    
+    if (existingBooking) {
+      return res.status(400).json({ 
+        message: `You already have a ${existingBooking.status} booking for this shift.` 
+      });
     }
 
-    shift.status.status = 'pending';
-    shift.status.by = userId;
-    shift.takenBy.push(userId);
-    shift.slotsTaken += 1;
+    // Check if there are available slots
+    const bookedSlots = shift.status.filter(statusEntry => 
+      ['pending', 'approved'].includes(statusEntry.status)
+    ).length;
+    
+    if (bookedSlots >= shift.quantity) {
+      return res.status(400).json({ message: 'No available slots for this shift.' });
+    }
+
+    // Add new status entry for this user
+    shift.status.push({
+      status: 'pending',
+      by: userId,
+      isBackdoorRequest,
+      bookedAt: new Date()
+    });
 
     await shiftDoc.save();
-    res.status(200).json({ message: 'Shift booked successfully', data: shift });
+    
+    // Populate user data for response
+    await shiftDoc.populate('shifts.status.by', 'fullName email');
+    
+    res.status(200).json({ 
+      message: 'Shift booked successfully', 
+      data: shift 
+    });
   } catch (error) {
+    console.error('Error booking shift:', error);
     res.status(500).json({ message: 'Error booking shift', error });
   }
 };
 
-// Admin approves a booked shift (set status to 'approved')
+// Admin approves a specific user's booking for a shift
 exports.approveShift = async (req, res) => {
   try {
     const { shiftId } = req.params;
-    if (!shiftId) {
-      return res.status(400).json({ message: 'shiftId is required.' });
+    const { userId, reviewerId } = req.body;
+    
+    if (!shiftId || !userId) {
+      return res.status(400).json({ message: 'shiftId and userId are required.' });
     }
 
     // Find the shift document containing the shift
@@ -60,27 +90,49 @@ exports.approveShift = async (req, res) => {
       return res.status(404).json({ message: 'Shift not found in document.' });
     }
 
-    // Only allow approval if pending
-    if (shift.status.status !== 'pending') {
-      return res.status(400).json({ message: 'Only pending shifts can be approved.' });
+    // Find the user's pending booking
+    const userBooking = shift.status.find(statusEntry => 
+      statusEntry.by && statusEntry.by.toString() === userId && 
+      statusEntry.status === 'pending'
+    );
+    
+    if (!userBooking) {
+      return res.status(400).json({ 
+        message: 'No pending booking found for this user on this shift.' 
+      });
     }
 
-    shift.status.status = 'approved';
+    // Update the user's booking to approved
+    userBooking.status = 'approved';
+    userBooking.reviewedAt = new Date();
+    if (reviewerId) {
+      userBooking.reviewedBy = reviewerId;
+    }
+
     await shiftDoc.save();
-    res.status(200).json({ message: 'Shift approved successfully', data: shift });
+    
+    // Populate user data for response
+    await shiftDoc.populate('shifts.status.by', 'fullName email');
+    await shiftDoc.populate('shifts.status.reviewedBy', 'fullName email');
+    
+    res.status(200).json({ 
+      message: 'Shift approved successfully', 
+      data: shift 
+    });
   } catch (error) {
+    console.error('Error approving shift:', error);
     res.status(500).json({ message: 'Error approving shift', error });
   }
 };
 
-// Reject a shift (admin only)
+// Reject a specific user's booking for a shift (admin only)
 exports.rejectShift = async (req, res) => {
   try {
     const { shiftId } = req.params;
-    const { reason } = req.body;
+    const { userId, reason, reviewerId } = req.body;
     
-    if (!shiftId) {
-      return res.status(400).json({ message: 'shiftId is required.' });
+    if (!shiftId || !userId) {
+      return res.status(400).json({ message: 'shiftId and userId are required.' });
     }
 
     // Find the shift document containing the shift
@@ -95,33 +147,47 @@ exports.rejectShift = async (req, res) => {
       return res.status(404).json({ message: 'Shift not found in document.' });
     }
 
-    // Only allow rejection if pending
-    if (shift.status.status !== 'pending') {
-      return res.status(400).json({ message: 'Only pending shifts can be rejected.' });
+    // Find the user's pending booking
+    const userBooking = shift.status.find(statusEntry => 
+      statusEntry.by && statusEntry.by.toString() === userId && 
+      statusEntry.status === 'pending'
+    );
+    
+    if (!userBooking) {
+      return res.status(400).json({ 
+        message: 'No pending booking found for this user on this shift.' 
+      });
     }
 
-    // Store the user who booked the shift before clearing
-    const rejectedUserId = shift.status.by;
-    
-    // Reset the shift to available status and clear the booking
-    shift.status.status = 'available';
-    shift.status.by = null;
-    shift.slotsTaken = Math.max(0, shift.slotsTaken - 1);
-    shift.takenBy = shift.takenBy.filter(userId => userId.toString() !== rejectedUserId?.toString());
+    // Update the user's booking to rejected
+    userBooking.status = 'rejected';
+    userBooking.rejectionReason = reason || 'No reason provided'; // Store reason in status entry too
+    userBooking.reviewedAt = new Date();
+    if (reviewerId) {
+      userBooking.reviewedBy = reviewerId;
+    }
     
     // Add to rejection history
     if (!shift.rejectionHistory) {
       shift.rejectionHistory = [];
     }
     shift.rejectionHistory.push({
-      userId: rejectedUserId,
+      userId: userId,
       reason: reason || 'No reason provided',
       rejectedAt: new Date(),
-      rejectedBy: req.user?._id || null // Admin who rejected (if available in req.user)
+      rejectedBy: reviewerId || null
     });
 
     await shiftDoc.save();
-    res.status(200).json({ message: 'Shift rejected successfully', data: shift });
+    
+    // Populate user data for response
+    await shiftDoc.populate('shifts.status.by', 'fullName email');
+    await shiftDoc.populate('shifts.status.reviewedBy', 'fullName email');
+    
+    res.status(200).json({ 
+      message: 'Shift rejected successfully', 
+      data: shift 
+    });
   } catch (error) {
     console.error('Error rejecting shift:', error);
     res.status(500).json({ message: 'Error rejecting shift', error });
@@ -245,9 +311,8 @@ exports.createShifts = async (req, res) => {
     const normalizedShifts = shiftsArray.map(shift => ({
       ...shift,
       published: shift.published !== undefined ? shift.published : true, // Default to published for demo
-      status: shift.status || { status: 'available' },
-      slotsTaken: shift.slotsTaken || 0,
-      takenBy: shift.takenBy || []
+      status: shift.status || [], // Initialize empty status array
+      rejectionHistory: shift.rejectionHistory || []
     }));
     
     shiftsDoc.shifts.push(...normalizedShifts);
@@ -280,39 +345,43 @@ exports.getApprovedShiftsByUser = async (req, res) => {
 
     // Find all shifts documents
     const allShiftsDocs = await Shifts.find().populate('department', 'name');
-    let filteredShifts = [];
+    let approvedShifts = [];
 
     // Collect all approved shifts for the user in the month
     for (const doc of allShiftsDocs) {
-      const userShifts = doc.shifts.filter(shift => {
+      const userApprovedShifts = doc.shifts.filter(shift => {
         const shiftDate = new Date(shift.date);
         const inDate = shiftDate >= startDate && shiftDate < endDate;
-        const isUserShift = shift.takenBy && shift.takenBy.some(userId_ref => userId_ref.toString() === userId);
-        const isApproved = shift.status.status === 'approved';
-        return inDate && isUserShift && isApproved;
-      });
-      
-      // Populate user data for each shift
-      if (userShifts.length > 0) {
-        await doc.populate('shifts.takenBy', 'fullName email');
-        await doc.populate('shifts.status.by', 'fullName email');
         
-        const shiftsWithDepartment = userShifts.map(shift => ({
-          ...shift.toObject(),
-          department: {
-            _id: doc.department._id,
-            name: doc.department.name
-          }
-        }));
-        filteredShifts.push(...shiftsWithDepartment);
-      }
+        // Check if user has an approved booking for this shift
+        const userApprovedBooking = shift.status.find(statusEntry => 
+          statusEntry.by && statusEntry.by.toString() === userId && 
+          statusEntry.status === 'approved'
+        );
+        
+        return inDate && userApprovedBooking;
+      }).map(shift => ({
+        ...shift.toObject(),
+        department: {
+          _id: doc.department._id,
+          name: doc.department.name
+        }
+      }));
+      
+      approvedShifts.push(...userApprovedShifts);
     }
 
-    console.log('Approved shifts found:', filteredShifts.length); // Debug log
+    // Populate user data
+    for (const doc of allShiftsDocs) {
+      await doc.populate('shifts.status.by', 'fullName email');
+      await doc.populate('shifts.status.reviewedBy', 'fullName email');
+    }
+
+    console.log('Approved shifts found:', approvedShifts.length); // Debug log
 
     res.status(200).json({
       message: 'Approved shifts fetched successfully',
-      data: filteredShifts
+      data: approvedShifts
     });
 
   } catch (error) {
@@ -352,12 +421,23 @@ exports.getAvailablePublishedShiftsByUserDepartment = async (req, res) => {
     // Filter published and available shifts within the month
     const availableShifts = shiftsDoc.shifts.filter(shift => {
       const shiftDate = new Date(shift.date);
-      return (
-        shift.published === true &&
-        shift.status.status === 'available' &&
-        shift.slotsTaken < shift.quantity && // Available slots check
-        shiftDate >= startDate && shiftDate < endDate
+      const isInDateRange = shiftDate >= startDate && shiftDate < endDate;
+      const isPublished = shift.published === true;
+      
+      // Count taken slots (pending + approved)
+      const takenSlots = shift.status.filter(statusEntry => 
+        ['pending', 'approved'].includes(statusEntry.status)
+      ).length;
+      
+      const hasAvailableSlots = takenSlots < shift.quantity;
+      
+      // Check if user hasn't already booked this shift
+      const userHasntBooked = !shift.status.some(statusEntry => 
+        statusEntry.by && statusEntry.by.toString() === userId && 
+        ['pending', 'approved'].includes(statusEntry.status)
       );
+      
+      return isPublished && isInDateRange && hasAvailableSlots && userHasntBooked;
     });
 
     res.status(200).json({
@@ -370,7 +450,7 @@ exports.getAvailablePublishedShiftsByUserDepartment = async (req, res) => {
 };
 
 
-// Function to fetch all published and available shifts in a user's department
+// Function to fetch all published and available shifts in other departments
 exports.getAvailablePublishedShiftsByOtherDepartment = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -410,22 +490,32 @@ exports.getAvailablePublishedShiftsByOtherDepartment = async (req, res) => {
       const shifts = doc.shifts.filter(shift => {
         const shiftDate = new Date(shift.date);
         const isInRange = shiftDate >= startDate && shiftDate < endDate;
-        const hasSlots = shift.slotsTaken < shift.quantity;
+        const isPublished = shift.published === true;
+        
+        // Count taken slots (pending + approved)
+        const takenSlots = shift.status.filter(statusEntry => 
+          ['pending', 'approved'].includes(statusEntry.status)
+        ).length;
+        
+        const hasSlots = takenSlots < shift.quantity;
+        
+        // Check if user hasn't already booked this shift
+        const userHasntBooked = !shift.status.some(statusEntry => 
+          statusEntry.by && statusEntry.by.toString() === userId && 
+          ['pending', 'approved'].includes(statusEntry.status)
+        );
+        
         console.log('Shift check:', {
-          published: shift.published,
-          status: shift.status.status,
+          published: isPublished,
           isInRange,
           hasSlots,
-          slotsTaken: shift.slotsTaken,
+          userHasntBooked,
+          takenSlots,
           quantity: shift.quantity,
           date: shift.date
         }); // Debug log
-        return (
-          shift.published === true &&
-          shift.status.status === 'available' &&
-          shift.slotsTaken < shift.quantity && // Available slots check
-          shiftDate >= startDate && shiftDate < endDate
-        );
+        
+        return isPublished && isInRange && hasSlots && userHasntBooked;
       }).map(shift => ({
         ...shift.toObject(),
         department: {
@@ -503,25 +593,39 @@ exports.getPendingShifts = async (req, res) => {
     for (const doc of allShiftsDocs) {
       const shifts = doc.shifts.filter(shift => {
         const shiftDate = new Date(shift.date);
-        return (
-          shift.published === true &&
-          shift.status.status === 'pending' &&
-          shiftDate >= startDate && shiftDate < endDate
+        const isInDateRange = shiftDate >= startDate && shiftDate < endDate;
+        const isPublished = shift.published === true;
+        
+        // Check if shift has any pending bookings
+        const hasPendingBookings = shift.status.some(statusEntry => 
+          statusEntry.status === 'pending'
         );
+        
+        return isPublished && isInDateRange && hasPendingBookings;
       });
       
-      // Populate user data for each shift
-      await doc.populate('shifts.status.by', 'fullName email');
-      await doc.populate('shifts.takenBy', 'fullName email');
-      
-      const shiftsWithDepartment = shifts.map(shift => ({
-        ...shift.toObject(),
-        department: {
-          _id: doc.department._id,
-          name: doc.department.name
+      // For each shift with pending bookings, create entries for each pending user
+      for (const shift of shifts) {
+        const pendingBookings = shift.status.filter(statusEntry => 
+          statusEntry.status === 'pending'
+        );
+        
+        for (const booking of pendingBookings) {
+          pendingShifts.push({
+            ...shift.toObject(),
+            department: {
+              _id: doc.department._id,
+              name: doc.department.name
+            },
+            pendingBooking: booking // Include the specific pending booking info
+          });
         }
-      }));
-      pendingShifts.push(...shiftsWithDepartment);
+      }
+    }
+
+    // Populate user data
+    for (const doc of allShiftsDocs) {
+      await doc.populate('shifts.status.by', 'fullName email');
     }
 
     res.status(200).json({
@@ -557,12 +661,16 @@ exports.getPendingShiftsByUser = async (req, res) => {
     for (const doc of allShiftsDocs) {
       const userPendingShifts = doc.shifts.filter(shift => {
         const shiftDate = new Date(shift.date);
-        return (
-          shift.published === true &&
-          shift.status.status === 'pending' &&
-          shift.takenBy.includes(userId) &&
-          shiftDate >= startDate && shiftDate < endDate
+        const isInDateRange = shiftDate >= startDate && shiftDate < endDate;
+        const isPublished = shift.published === true;
+        
+        // Check if user has a pending booking for this shift
+        const userPendingBooking = shift.status.find(statusEntry => 
+          statusEntry.by && statusEntry.by.toString() === userId && 
+          statusEntry.status === 'pending'
         );
+        
+        return isPublished && isInDateRange && userPendingBooking;
       }).map(shift => ({
         ...shift.toObject(),
         department: {
@@ -570,6 +678,7 @@ exports.getPendingShiftsByUser = async (req, res) => {
           name: doc.department.name
         }
       }));
+      
       pendingShifts.push(...userPendingShifts);
     }
 
@@ -610,11 +719,15 @@ exports.getPendingShiftsAndRejectionHistoryByUser = async (req, res) => {
       const pendingShifts = doc.shifts.filter(shift => {
         const shiftDate = new Date(shift.date);
         const inDate = shiftDate >= startDate && shiftDate < endDate;
-        const isPending = shift.status.status === 'pending';
-        const isUserShift = shift.takenBy.includes(userId);
         const isPublished = shift.published === true;
         
-        return isPublished && isPending && isUserShift && inDate;
+        // Check if user has a pending booking for this shift
+        const userPendingBooking = shift.status.find(statusEntry => 
+          statusEntry.by && statusEntry.by.toString() === userId && 
+          statusEntry.status === 'pending'
+        );
+        
+        return isPublished && inDate && userPendingBooking;
       }).map(shift => ({
         ...shift.toObject(),
         department: {
@@ -624,7 +737,50 @@ exports.getPendingShiftsAndRejectionHistoryByUser = async (req, res) => {
         type: 'pending'
       }));
 
-      // Get shifts where this user was rejected in the current month
+      // Get user's rejected shifts from status array
+      const rejectedFromStatus = doc.shifts.filter(shift => {
+        const shiftDate = new Date(shift.date);
+        const inDate = shiftDate >= startDate && shiftDate < endDate;
+        const isPublished = shift.published === true;
+        
+        // Check if user has a rejected booking for this shift
+        const userRejectedBooking = shift.status.find(statusEntry => 
+          statusEntry.by && statusEntry.by.toString() === userId && 
+          statusEntry.status === 'rejected' &&
+          statusEntry.reviewedAt >= startDate && statusEntry.reviewedAt < endDate
+        );
+        
+        return isPublished && inDate && userRejectedBooking;
+      }).map(shift => {
+        const userRejectedBooking = shift.status.find(statusEntry => 
+          statusEntry.by && statusEntry.by.toString() === userId && 
+          statusEntry.status === 'rejected'
+        );
+        
+        return {
+          ...shift.toObject(),
+          department: {
+            _id: doc.department._id,
+            name: doc.department.name
+          },
+          type: 'rejected',
+          rejectionReason: (() => {
+            // First try to get reason from the status entry itself
+            if (userRejectedBooking?.rejectionReason) {
+              return userRejectedBooking.rejectionReason;
+            }
+            // Fall back to rejection history for this user
+            const userRejection = shift.rejectionHistory?.find(rejection => 
+              rejection.userId && rejection.userId.toString() === userId
+            );
+            return userRejection ? userRejection.reason : 'No reason provided';
+          })(),
+          rejectedAt: userRejectedBooking?.reviewedAt || null,
+          rejectedBy: userRejectedBooking?.reviewedBy || null
+        };
+      });
+
+      // Get shifts where this user was rejected in the current month (from rejection history)
       const shiftsWithRejections = doc.shifts.filter(shift => {
         const hasRejectionHistory = shift.rejectionHistory && shift.rejectionHistory.length > 0;
         const isPublished = shift.published === true;
@@ -664,15 +820,18 @@ exports.getPendingShiftsAndRejectionHistoryByUser = async (req, res) => {
       });
 
       userShifts.push(...pendingShifts);
-      rejectedShifts.push(...shiftsWithRejections);
+      rejectedShifts.push(...rejectedFromStatus, ...shiftsWithRejections);
     }
 
-    // Combine pending and rejected shifts
-    const allUserShifts = [...userShifts, ...rejectedShifts];
+    // Combine pending and rejected shifts and deduplicate by shift ID and type
+    const combinedShifts = [...userShifts, ...rejectedShifts];
+    const deduplicatedShifts = combinedShifts.filter((shift, index, array) => {
+      return index === array.findIndex(s => s._id.toString() === shift._id.toString() && s.type === shift.type);
+    });
     
     res.status(200).json({
       message: 'Pending shifts and rejection history fetched successfully',
-      data: allUserShifts
+      data: deduplicatedShifts
     });
   } catch (error) {
     console.error('Error in getPendingShiftsAndRejectionHistoryByUser:', error);
@@ -712,16 +871,21 @@ exports.getAdminDashboardStats = async (req, res) => {
       // Count total slots uploaded this month
       totalSlotsUploaded += monthShifts.reduce((sum, shift) => sum + shift.quantity, 0);
       
-      // Count available slots (published and available with open slots)
-      availableSlots += monthShifts
-        .filter(shift => shift.status.status === 'available' && shift.slotsTaken < shift.quantity)
-        .reduce((sum, shift) => sum + (shift.quantity - shift.slotsTaken), 0);
-      
-      // Count total requests (approved + pending)
-      totalRequests += monthShifts.reduce((sum, shift) => sum + shift.slotsTaken, 0);
-      
-      // Count pending approvals
-      pendingApprovals += monthShifts.filter(shift => shift.status.status === 'pending').length;
+      // Count available slots and calculate requests/pending
+      for (const shift of monthShifts) {
+        const pendingBookings = shift.status.filter(statusEntry => statusEntry.status === 'pending').length;
+        const approvedBookings = shift.status.filter(statusEntry => statusEntry.status === 'approved').length;
+        const totalBookings = pendingBookings + approvedBookings;
+        
+        // Available slots = total quantity - booked slots
+        availableSlots += Math.max(0, shift.quantity - totalBookings);
+        
+        // Total requests = all pending + approved bookings
+        totalRequests += totalBookings;
+        
+        // Pending approvals = pending bookings
+        pendingApprovals += pendingBookings;
+      }
     }
 
     res.status(200).json({
@@ -737,6 +901,55 @@ exports.getAdminDashboardStats = async (req, res) => {
   } catch (error) {
     console.error('Error in getAdminDashboardStats:', error);
     res.status(500).json({ message: 'Error fetching admin dashboard statistics', error });
+  }
+};
+
+// User cancels their own pending booking
+exports.cancelUserBooking = async (req, res) => {
+  try {
+    const { shiftId } = req.params;
+    const { userId } = req.body;
+    
+    if (!shiftId || !userId) {
+      return res.status(400).json({ message: 'shiftId and userId are required.' });
+    }
+
+    // Find the shift document containing the shift
+    const shiftDoc = await Shifts.findOne({ 'shifts._id': shiftId });
+    if (!shiftDoc) {
+      return res.status(404).json({ message: 'Shift not found.' });
+    }
+
+    // Find the shift in the array
+    const shift = shiftDoc.shifts.id(shiftId);
+    if (!shift) {
+      return res.status(404).json({ message: 'Shift not found in document.' });
+    }
+
+    // Find the user's pending booking
+    const userBookingIndex = shift.status.findIndex(statusEntry => 
+      statusEntry.by && statusEntry.by.toString() === userId && 
+      statusEntry.status === 'pending'
+    );
+    
+    if (userBookingIndex === -1) {
+      return res.status(400).json({ 
+        message: 'No pending booking found for this user on this shift.' 
+      });
+    }
+
+    // Remove the user's booking
+    shift.status.splice(userBookingIndex, 1);
+
+    await shiftDoc.save();
+    
+    res.status(200).json({ 
+      message: 'Booking canceled successfully', 
+      data: shift 
+    });
+  } catch (error) {
+    console.error('Error canceling booking:', error);
+    res.status(500).json({ message: 'Error canceling booking', error });
   }
 };
 

@@ -1,4 +1,3 @@
-const { date, ref, required } = require('joi');
 const mongoose = require('mongoose');
 
 const shiftsSchema = new mongoose.Schema({
@@ -29,32 +28,39 @@ const shiftsSchema = new mongoose.Schema({
             required: true,
             default: false // Default to false if not specified     
         },
-        status: {
+        status: [{
             status: {
                 type: String,
-                enum: ['available', 'pending', 'approved'],
+                enum: ['available', 'pending', 'approved', 'rejected'],
                 default: 'available',
             },
             by: {
                 type: mongoose.Schema.Types.ObjectId,
                 ref: 'User',
                 required: false //can be empty when no user has picked it
+            },
+            isBackdoorRequest: {
+                type: Boolean,
+                default: false // Flag to identify shifts created from backdoor requests
+            },
+            bookedAt: {
+                type: Date,
+                default: Date.now
+            },
+            reviewedAt: {
+                type: Date,
+                required: false
+            },
+            reviewedBy: {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'User', // Admin who reviewed the request
+                required: false
+            },
+            rejectionReason: {
+                type: String,
+                required: false // Only used when status is 'rejected'
             }
-        },
-        slotsTaken: {
-            type: Number, // Number of available slots for this shift
-            required: true,
-            default: 0 // Default to 0 if not specified
-        },
-        takenBy: [{
-            type: mongoose.Schema.Types.ObjectId,
-            ref: 'User', // Reference to the User model
-            required: false // Optional, can be empty if no users have taken the shift
         }],
-        isBackdoorRequest: {
-            type: Boolean,
-            default: false // Flag to identify shifts created from backdoor requests
-        },
         rejectionHistory: [{
             userId: {
                 type: mongoose.Schema.Types.ObjectId,
